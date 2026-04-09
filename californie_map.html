@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html>
+<head>
+    
+    <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+    <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.3/dist/leaflet.js"></script>
+    <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.2/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Leaflet.awesome-markers/2.0.2/leaflet.awesome-markers.js"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.3/dist/leaflet.css"/>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.2/dist/css/bootstrap.min.css"/>
+    <link rel="stylesheet" href="https://netdna.bootstrapcdn.com/bootstrap/3.0.0/css/bootstrap-glyphicons.css"/>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.2.0/css/all.min.css"/>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/Leaflet.awesome-markers/2.0.2/leaflet.awesome-markers.css"/>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/python-visualization/folium/folium/templates/leaflet.awesome.rotate.min.css"/>
+    
+            <meta name="viewport" content="width=device-width,
+                initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+            <style>
+                #map_87b84c491aafdf543531e64492d8c00e {
+                    position: relative;
+                    width: 100.0%;
+                    height: 100.0%;
+                    left: 0.0%;
+                    top: 0.0%;
+                }
+                .leaflet-container { font-size: 1rem; }
+            </style>
+
+            <style>html, body {
+                width: 100%;
+                height: 100%;
+                margin: 0;
+                padding: 0;
+            }
+            </style>
+
+            <style>#map {
+                position:absolute;
+                top:0;
+                bottom:0;
+                right:0;
+                left:0;
+                }
+            </style>
+
+            <script>
+                L_NO_TOUCH = false;
+                L_DISABLE_3D = false;
+            </script>
+
+        
+</head>
+<body>
+    
+    
+<div style="position: fixed; 
+            top: 10px; left: 50px; 
+            width: 300px; height: 40px; 
+            background-color: white;
+            border: 2px solid black;
+            border-radius: 5px;
+            z-index: 1000;
+            text-align: center;
+            font-family: Arial, sans-serif;
+            font-weight: bold;
+            padding: 5px;">
+    <span style="color: blue;">■ Bounding Box</span> | 
+    <span style="color: red;">■ Californie</span>
+</div>
+    
+<div style="position: fixed; 
+            bottom: 10px; left: 50px; 
+            width: auto; height: auto; 
+            background-color: white;
+            border: 1px solid black;
+            border-radius: 5px;
+            z-index: 1000;
+            font-family: Arial, sans-serif;
+            font-size: 12px;
+            padding: 5px;">
+    <b>Bounding Box Californie:</b><br>
+    West: -124.48° | South: 32.53°<br>
+    East: -114.13° | North: 42.01°
+</div>
+    
+            <div class="folium-map" id="map_87b84c491aafdf543531e64492d8c00e" ></div>
+        
+</body>
+<script>
+    
+    
+            var map_87b84c491aafdf543531e64492d8c00e = L.map(
+                "map_87b84c491aafdf543531e64492d8c00e",
+                {
+                    center: [37.269999999999996, -119.305],
+                    crs: L.CRS.EPSG3857,
+                    ...{
+  "zoom": 6,
+  "zoomControl": true,
+  "preferCanvas": false,
+}
+
+                }
+            );
+
+            
+
+        
+    
+            var tile_layer_224afa5aa5e805910343ae1ee9e3c02f = L.tileLayer(
+                "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+                {
+  "minZoom": 0,
+  "maxZoom": 19,
+  "maxNativeZoom": 19,
+  "noWrap": false,
+  "attribution": "\u0026copy; \u003ca href=\"https://www.openstreetmap.org/copyright\"\u003eOpenStreetMap\u003c/a\u003e contributors",
+  "subdomains": "abc",
+  "detectRetina": false,
+  "tms": false,
+  "opacity": 1,
+}
+
+            );
+        
+    
+            tile_layer_224afa5aa5e805910343ae1ee9e3c02f.addTo(map_87b84c491aafdf543531e64492d8c00e);
+        
+    
+            var rectangle_e924d7150ab16912b7f5ed29f3db9817 = L.rectangle(
+                [[32.53, -124.48], [42.01, -114.13]],
+                {"bubblingMouseEvents": true, "color": "blue", "dashArray": null, "dashOffset": null, "fill": true, "fillColor": "blue", "fillOpacity": 0.1, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "noClip": false, "opacity": 1.0, "smoothFactor": 1.0, "stroke": true, "weight": 3}
+            ).addTo(map_87b84c491aafdf543531e64492d8c00e);
+        
+    
+        var popup_03fd028f53a33e83b92c77087266a0de = L.popup({
+  "maxWidth": "100%",
+});
+
+        
+            
+                var html_2431a0f93c500eb7276c3c8c46c9d3ee = $(`<div id="html_2431a0f93c500eb7276c3c8c46c9d3ee" style="width: 100.0%; height: 100.0%;">California Bounding Box</div>`)[0];
+                popup_03fd028f53a33e83b92c77087266a0de.setContent(html_2431a0f93c500eb7276c3c8c46c9d3ee);
+            
+        
+
+        rectangle_e924d7150ab16912b7f5ed29f3db9817.bindPopup(popup_03fd028f53a33e83b92c77087266a0de)
+        ;
+
+        
+    
+    
+            var polygon_2d05f6da6cdd700082b475bf66d79576 = L.polygon(
+                [[42.01, -124.48], [42.01, -120.0], [41.0, -120.0], [40.0, -122.0], [39.0, -122.0], [38.0, -120.0], [37.0, -119.0], [36.0, -119.0], [35.0, -116.0], [34.0, -117.0], [33.0, -117.0], [32.53, -117.0], [32.53, -114.13], [35.0, -114.5], [36.0, -115.0], [37.0, -116.0], [38.0, -118.0], [39.0, -120.0], [40.0, -122.0], [42.01, -122.0], [42.01, -124.48]],
+                {"bubblingMouseEvents": true, "color": "red", "dashArray": null, "dashOffset": null, "fill": true, "fillColor": "red", "fillOpacity": 0.3, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "noClip": false, "opacity": 1.0, "smoothFactor": 1.0, "stroke": true, "weight": 2}
+            ).addTo(map_87b84c491aafdf543531e64492d8c00e);
+        
+    
+        var popup_26a659283d8f4dfd4aeb2e73b68c737f = L.popup({
+  "maxWidth": "100%",
+});
+
+        
+            
+                var html_e0df52b2b0470921169475004f885351 = $(`<div id="html_e0df52b2b0470921169475004f885351" style="width: 100.0%; height: 100.0%;">Californie</div>`)[0];
+                popup_26a659283d8f4dfd4aeb2e73b68c737f.setContent(html_e0df52b2b0470921169475004f885351);
+            
+        
+
+        polygon_2d05f6da6cdd700082b475bf66d79576.bindPopup(popup_26a659283d8f4dfd4aeb2e73b68c737f)
+        ;
+
+        
+    
+</script>
+</html>
