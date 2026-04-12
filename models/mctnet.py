@@ -7,10 +7,21 @@ Paper : A lightweight CNN-Transformer network for pixel-based crop
 Architecture (3-stage hierarchical):
     Stage 1: (B,36,10) → ALPE → MSCNN + Transformer → CTFusion → (B,36,20)
              → MaxPool → (B,18,20)
-    Stage 2: (B,18,20) → PE   → MSCNN + Transformer → CTFusion → (B,18,40)
+    Stage 2: (B,18,20) → Positional Encoding(PE) → MSCNN + Transformer → CTFusion → (B,18,40)
              → MaxPool → (B,9,40)
     Stage 3: (B,9,40)  → PE   → MSCNN + Transformer → CTFusion → (B,9,80)
              → GAP     → (B,80) → Linear → (B, n_classes)
+
+
+             
+Le Positional Encoding permet au Transformer de connaître la position temporelle de chaque observation. 
+Sans cela, il ne pourrait pas comprendre l’ordre des données.
+
+CNN → capture les motifs locaux dans le temps
+
+Transformer → capture les dépendances à long terme
+
+ALPE → gère intelligemment les dates manquantes (position+mark+eca(ychuf les donnees inportantes))
 =======================================================================
 """
 
@@ -21,7 +32,7 @@ import torch.nn.functional as F
 
 
 # -----------------------------------------------------------------------
-# ECA — Efficient Channel Attention
+# ECA — Efficient Channel Attention => importance t3 les bande
 # -----------------------------------------------------------------------
 class ECAModule(nn.Module):
     """
@@ -57,7 +68,7 @@ class ECAModule(nn.Module):
 
 
 # -----------------------------------------------------------------------
-# ALPE — Adaptive Learned Positional Encoding (Stage 1 only)
+# ALPE — Adaptive Learned Positional Encoding (Stage 1 only)  smart 3la pe ki myl9ach date y9ulu ychuf li 9blu w morah 
 # -----------------------------------------------------------------------
 class ALPE(nn.Module):
     """
@@ -104,7 +115,7 @@ class ALPE(nn.Module):
 
 
 # -----------------------------------------------------------------------
-# Standard Sinusoidal PE (Stages 2 and 3)
+# Standard Sinusoidal PE (Stages 2 and 3) ystfhum 3la 7ssab les dates 
 # -----------------------------------------------------------------------
 class SinusoidalPE(nn.Module):
     """Standard sinusoidal positional encoding."""
@@ -202,7 +213,7 @@ class TransformerBlock(nn.Module):
 
 
 # -----------------------------------------------------------------------
-# MCTBlock — Single stage block
+# MCTBlock — Single stage block (fusionne CNN + Transformer)
 # -----------------------------------------------------------------------
 class MCTBlock(nn.Module):
     """
