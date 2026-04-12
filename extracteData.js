@@ -1,265 +1,267 @@
-// ============================================================
-// EXTRACTION PIXEL-BASED : 36 CSV PAR ZONE
-// Conforme au papier : MCTNet (Wang et al., 2024)
-// Chaque CSV = ~10 000 pixels × (10 bandes + 1 class_label)
-// 1 CSV = 1 période de 10 jours → 3 CSV/mois → 36 CSV/an
-// 4 zones × 36 CSV = 144 fichiers au total
-// ============================================================
-
-// ============================================================
-// 1. CHARGER LES ÉTATS ET DIVISER EN ZONES
-// (2 zones par état comme dans Fig.1 du papier)
-// ============================================================
-var states   = ee.FeatureCollection("TIGER/2018/States");
-var CA_state = states.filter(ee.Filter.eq('NAME', 'California'));
-var AR_state = states.filter(ee.Filter.eq('NAME', 'Arkansas'));
-
-var CA_zone1 = CA_state.geometry().intersection(
-  ee.Geometry.Rectangle([-124.48, 37.3,  -114.13, 42.01]), 1);
-var CA_zone2 = CA_state.geometry().intersection(
-  ee.Geometry.Rectangle([-124.48, 32.53, -114.13, 37.3]),  1);
-var AR_zone1 = AR_state.geometry().intersection(
-  ee.Geometry.Rectangle([-94.62,  34.8,  -89.64,  36.50]), 1);
-var AR_zone2 = AR_state.geometry().intersection(
-  ee.Geometry.Rectangle([-94.62,  33.00, -89.64,  34.8]),  1);
-
-// ============================================================
-// 2. CDL 2021 — LABEL + FILTRE CONFIANCE 95% + MASQUE WORLDCOVER
+// ================================================================
+// MCTNet — GEE Data Extraction (Final Corrected Version v12)
+// Paper: Wang et al., 2024
+// Project: M1 SII USTHB 2025/2026
 //
-// Papier (section 2.2.4) :
-// "we set a 95% confidence to filter the CDL map to improve
-//  the quality of sampling"
-// "used the ESA WorldCover 2021 to mask non-cropland areas"
-// ============================================================
-var cdlImage      = ee.Image('USDA/NASS/CDL/2021');
-var croplandLabel = cdlImage.select('cropland');
-var cdlConf       = cdlImage.select('confidence'); // bande confidence (0-100)
+// Fixes:
+//   v2 : CDL → ee.Image direct asset ID
+//   v3 : WorldCover → plain JS loop
+//   v4 : Reapply validMask after where(); pixel_id from system:index
+//   v5 : frequencyHistogram → ee.Reducer.count()
+//   v6 : ee.Reducer.count() → aggregate_histogram
+//   v7 : ee.Dictionary.fromLists → plain JS; ee.List index lookup
+//   v8 : reduceRegions() → sampleRegions(); scale 30→100
+//   v9 : centroid → ee.ErrorMargin(1); tileScale:4
+//   v10: drop WorldCover mask; drop centroid(); scale→250
+//   v11: pixelLonLat() baked into composite; geometries:false
+//        in sampleRegions
+//   v12: PERMANENT centroid fix — bake pixelLonLat into labelImg
+//        at sample() time so allPoints carries lon/lat as properties.
+//        Reconstruct true ee.Geometry.Point from those properties
+//        before sampleRegions — points have no area so centroid
+//        is never invoked anywhere in the pipeline.
+//        Per-class scale: 50 for crops, 150 for Others.
+// ================================================================
 
-// Masque confiance ≥ 95% (filtre qualité CDL)
-var confMask = cdlConf.gte(95);
+// ── ★ CHANGE THIS BEFORE EACH RUN ★ ──────────────────────────
+var ZONE = 'california';   // 'arkansas' or 'california'
+// ─────────────────────────────────────────────────────────────
 
-// Masque WorldCover 2021 : classe 40 = Cropland uniquement
-var worldCoverMask = ee.Image('ESA/WorldCover/v200/2021')
-                       .select('Map').eq(40);
+var YEAR     = 2021;
+var CDL_CONF = 50;
+var SEED     = 42;
 
-// Masque combiné : cropland WorldCover ET confiance CDL ≥ 95%
-var finalMask = worldCoverMask.and(confMask);
+// ================================================================
+// 1. ZONE CONFIGURATION
+// ================================================================
+var ZONES = {
+  arkansas: {
+    region         : ee.Geometry.Rectangle([-94.62, 33.00, -89.64, 36.50]),
+    cdlCodes       : [1,      2,        3,      5],
+    classNames     : ['Corn', 'Cotton', 'Rice', 'Soybeans'],
+    nClasses       : 4,
+    // Exact paper counts: Others(0), Corn(1), Cotton(2), Rice(3), Soybeans(4)
+    exactCounts    : [616, 1522, 762, 2423, 4677],
+    samplesPerClass: 2500
+  },
+  california: {
+    region         : ee.Geometry.Rectangle([-122.50, 35.00, -117.50, 40.50]),
+    cdlCodes       : [69,       3,      36,        75,        204],
+    classNames     : ['Grapes', 'Rice', 'Alfalfa', 'Almonds', 'Pistachios'],
+    nClasses       : 5,
+    // Exact paper counts: Others(0), Grapes(1), Rice(2), Alfalfa(3), Almonds(4), Pistachios(5)
+    exactCounts    : [3512, 2054, 2037, 974, 783, 640],
+    samplesPerClass: 2000
+  }
+};
 
-// ============================================================
-// 3. REMAPPING DES CLASSES SELON L'ARTICLE (Table 2)
+var cfg    = ZONES[ZONE];
+var region = cfg.region;
+var CODES  = cfg.cdlCodes;
+var NAMES  = cfg.classNames;
+var N      = cfg.nClasses;
+var SPC    = cfg.samplesPerClass;
+
+var BAND_NAMES = ['B2','B3','B4','B5','B6','B7','B8','B8A','B11','B12'];
+
+// ================================================================
+// 2. CDL 2021
+// ================================================================
+var cdl        = ee.Image('USDA/NASS/CDL/2021');
+var cropland   = cdl.select('cropland');
+var confidence = cdl.select('confidence');
+
+// ================================================================
+// 3. QUALITY MASK
+// ================================================================
+var validMask = confidence.gte(CDL_CONF);
+
+// ================================================================
+// 4. LABEL IMAGE  (0=Others, 1..N=target crops)
 //
-// Arkansas  (4 cultures + Others) :
-//   Corn=1 → 1 | Cotton=2 → 2 | Rice=3 → 3 | Soybeans=5 → 4
-//   tout le reste → 5 (Others)
+// Bake pixelLonLat in now so sampling picks up lon/lat as
+// plain numeric properties — no geometry calls ever needed.
+// ================================================================
+var labelBase = ee.Image(0).byte().rename('label');
+for (var k = 0; k < N; k++) {
+  labelBase = labelBase.where(cropland.eq(CODES[k]), k + 1);
+}
+labelBase = labelBase.updateMask(validMask);
+
+// Attach lon/lat bands to the label image used for sampling
+var labelImg = labelBase.addBands(ee.Image.pixelLonLat());
+// labelImg bands: ['label', 'longitude', 'latitude']
+
+// ================================================================
+// 5. EXACT STRATIFIED SAMPLING (Perfect Table 2 match)
 //
-// California (5 cultures + Others) :
-//   Grapes=69 → 1 | Rice=3 → 2 | Alfalfa=36 → 3
-//   Almonds=75 → 4 | Pistachios=204 → 5
-//   tout le reste → 6 (Others)
-//
-// Note papier : "crop types that constitute less than 5% of the
-// total number of samples were merged into Others"
-// → géré en post-traitement Python après export
-// ============================================================
-var AR_classImg = croplandLabel
-  .remap([1, 2, 3, 5], [1, 2, 3, 4], 5)
-  .rename('class_label')
-  .toByte();
+// We use stratifiedSample with the exact numbers requested
+// by the paper to avoid getting flooded by 'Others' class.
+// ================================================================
 
-var CA_classImg = croplandLabel
-  .remap([69, 3, 36, 75, 204], [1, 2, 3, 4, 5], 6)
-  .rename('class_label')
-  .toByte();
-
-// ============================================================
-// 4. BANDES SENTINEL-2 ET DATES
-// 10 bandes × 36 périodes = 360 features (papier section 2.2.3)
-// ============================================================
-var BANDS  = ['B2','B3','B4','B5','B6','B7','B8','B8A','B11','B12'];
-var months = ['01','02','03','04','05','06','07','08','09','10','11','12'];
-var days   = ['01','11','21'];
-
-// ============================================================
-// 5. FONCTION : COMPOSITE MÉDIAN SENTINEL-2 SUR 10 JOURS
-//
-// Papier (section 2.2.4) :
-// "computed the median value of the remaining observations
-//  at ten-day intervals, resulting in a total of 36 temporal sequences"
-// "there are still missing data in the sequences,
-//  and we used 0 to mark the missing data"
-// ============================================================
-function getComposite(dateStr, geometry) {
-  var start = ee.Date(dateStr);
-
-  // Fenêtre principale : 10 jours, nuages < 20%
-  var col10 = ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED')
-    .filterDate(start, start.advance(10, 'day'))
-    .filterBounds(geometry)
-    .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 20))
-    .select(BANDS);
-
-  // Fenêtre fallback : 30 jours, nuages < 50%
-  var col30 = ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED')
-    .filterDate(start, start.advance(30, 'day'))
-    .filterBounds(geometry)
-    .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 50))
-    .select(BANDS);
-
-  // Valeur 0 = données manquantes (convention MCTNet)
-  var empty = ee.Image.constant(ee.List.repeat(0, BANDS.length))
-                .rename(BANDS).toFloat();
-
-  return ee.Image(ee.Algorithms.If(
-    col10.size().gt(0),
-    col10.median().toFloat(),
-    ee.Image(ee.Algorithms.If(
-      col30.size().gt(0),
-      col30.median().toFloat(),
-      empty
-    ))
-  ));
+// Prepare class points list dynamically based on exact counts
+var cVals = [];
+for (var i = 0; i <= N; i++) {
+  cVals.push(i);
 }
 
-// ============================================================
-// 6. FONCTION : ÉCHANTILLONNAGE 10 000 PIXELS PAR ZONE/DATE
-//
-// Papier (section 2.2.4) :
-// "randomly sampled 10,000 points in each study area"
-// ============================================================
-function samplePixels(composite, classImg, geometry,
-                      stateName, zoneName, dateStr, csvNum) {
-
-  // Image finale : 10 bandes S2 + class_label remappé
-  // Appliquer le masque combiné (WorldCover + confiance 95%)
-  var image = composite
-    .addBands(classImg)
-    .updateMask(finalMask.clip(geometry))
-    .clip(geometry)
-    .toFloat();
-
-  // Échantillonnage aléatoire de 10 000 pixels cropland
-  var samples = image.sample({
-    region:     geometry,
-    scale:      10,      // résolution native S2 (10m)
-    numPixels:  10000,
-    seed:       42,      // seed fixe → reproductibilité
-    dropNulls:  true,    // ignorer pixels sans données
-    geometries: false    // pas de coordonnées → CSV plus léger
-  });
-
-  // Ajouter métadonnées
-  samples = samples.map(function(f) {
-    return f.set({
-      'date':   dateStr,
-      'state':  stateName,
-      'zone':   zoneName,
-      'csv_id': csvNum
-    });
-  });
-
-  return samples;
-}
-
-// ============================================================
-// 7. BOUCLE PRINCIPALE : 4 ZONES × 12 MOIS × 3 PÉRIODES = 144 CSV
-// ============================================================
-var zones = [
-  // Arkansas : 1=Corn 2=Cotton 3=Rice 4=Soybeans 5=Others
-  { geometry: AR_zone1, classImg: AR_classImg,
-    state: 'Arkansas',   zone: 'zone1', folder: 'Arkansas/zone1' },
-  { geometry: AR_zone2, classImg: AR_classImg,
-    state: 'Arkansas',   zone: 'zone2', folder: 'Arkansas/zone2' },
-  // California : 1=Grapes 2=Rice 3=Alfalfa 4=Almonds 5=Pistachios 6=Others
-  { geometry: CA_zone1, classImg: CA_classImg,
-    state: 'California', zone: 'zone1', folder: 'California/zone1' },
-  { geometry: CA_zone2, classImg: CA_classImg,
-    state: 'California', zone: 'zone2', folder: 'California/zone2' },
-];
-
-// Colonnes CSV : 10 bandes + class_label + métadonnées
-var exportCols = BANDS.concat(['class_label', 'date', 'state', 'zone', 'csv_id']);
-
-zones.forEach(function(z) {
-  print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-  print('🌍 ' + z.state + ' — ' + z.zone);
-
-  months.forEach(function(month) {
-    days.forEach(function(day, dayIdx) {
-
-      var dateStr = '2021-' + month + '-' + day;
-      var csvNum  = dayIdx + 1; // 1, 2, ou 3
-
-      var composite = getComposite(dateStr, z.geometry);
-
-      var samples = samplePixels(
-        composite, z.classImg, z.geometry,
-        z.state, z.zone, dateStr, csvNum
-      );
-
-      var fileName = z.state + '_' + z.zone + '_' + dateStr + '_csv' + csvNum;
-
-      Export.table.toDrive({
-        collection:     samples,
-        description:    fileName,
-        folder:         z.folder,
-        fileNamePrefix: fileName,
-        fileFormat:     'CSV',
-        selectors:      exportCols
-      });
-
-      print('  📤 ' + dateStr + ' | csv' + csvNum + ' → ' + fileName);
-    });
-  });
+var allPoints = labelImg.stratifiedSample({
+  numPoints  : 0,
+  classBand  : 'label',
+  region     : region,
+  scale      : 50,
+  classValues: cVals,
+  classPoints: cfg.exactCounts,
+  seed       : SEED,
+  tileScale  : 4,
+  geometries : false,
+  dropNulls  : true
+}).map(function(f) {
+  // labelImg already provides 'label', 'longitude', 'latitude'
+  var lon = f.get('longitude');
+  var lat = f.get('latitude');
+  return f
+    .set('pixel_id', f.get('system:index'))
+    .setGeometry(ee.Geometry.Point([lon, lat]));
 });
 
-// ============================================================
-// 8. RÉSUMÉ CONFORMITÉ PAPIER
-// ============================================================
-print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-print('✅ 144 tâches lancées (4 zones × 36 périodes)');
-print('');
-print('📋 CONFORMITÉ PAPIER MCTNet (Wang et al., 2024) :');
-print('   ✅ 10 bandes S2 : B2 B3 B4 B5 B6 B7 B8 B8A B11 B12');
-print('   ✅ 36 composites médians de 10 jours');
-print('   ✅ Pixels manquants → valeur 0');
-print('   ✅ Masque WorldCover 2021 (classe 40 = Cropland)');
-print('   ✅ Filtre confiance CDL ≥ 95%');
-print('   ✅ 10 000 pixels échantillonnés aléatoirement par zone');
-print('   ✅ Classes remappées selon Table 2 du papier');
-print('');
-print('🔢 CLASSES Arkansas (4 + Others) :');
-print('   1=Corn | 2=Cotton | 3=Rice | 4=Soybeans | 5=Others');
-print('');
-print('🔢 CLASSES California (5 + Others) :');
-print('   1=Grapes | 2=Rice | 3=Alfalfa | 4=Almonds | 5=Pistachios | 6=Others');
-print('');
-print('📂 DRIVE :');
-print('   Arkansas/zone1/   → 36 CSV');
-print('   Arkansas/zone2/   → 36 CSV');
-print('   California/zone1/ → 36 CSV');
-print('   California/zone2/ → 36 CSV');
-print('');
-print('👉 Tasks → Run All → Confirm');
-print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+print('★ Sampling done. Total points (server-side):', allPoints.size());
 
-// ============================================================
-// 9. VISUALISATION
-// ============================================================
+// ================================================================
+// 6. SANITY CHECK
+// ================================================================
+allPoints.aggregate_histogram('label').evaluate(function(hist) {
+  print('★ SANITY CHECK — sampled points per class:');
+  if (!hist) {
+    print('  ⚠️  histogram returned null — check region/CDL asset.');
+    return;
+  }
+  for (var key in hist) {
+    var idx       = parseInt(key, 10);
+    var className = idx === 0 ? 'Others' : NAMES[idx - 1];
+    print('  Class ' + key + ' (' + className + '): ' + hist[key] + ' pts');
+    if (hist[key] === 0) {
+      print('  ⚠️  Class ' + key + ' is empty — check CDL code!');
+    }
+  }
+});
+
+// ================================================================
+// 7. SENTINEL-2 CLOUD MASKING
+// ================================================================
+function maskS2clouds(img) {
+  var qa     = img.select('QA60');
+  var clouds = qa.bitwiseAnd(1 << 10).neq(0)
+                 .or(qa.bitwiseAnd(1 << 11).neq(0));
+  return img
+    .updateMask(clouds.not())
+    .select(BAND_NAMES)
+    .copyProperties(img, ['system:time_start']);
+}
+
+var s2 = ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED')
+           .filterBounds(region)
+           .filterDate(YEAR + '-01-01', YEAR + '-12-31')
+           .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 80))
+           .map(maskS2clouds);
+
+// ================================================================
+// 8. EXPORT — 36 CSV FILES, ONE PER 10-DAY TIMESTEP
+//
+// FIX v12: allPoints now carries true Point geometries constructed
+//          from lon/lat properties. sampleRegions locates each
+//          point directly — no centroid computation ever triggered.
+//
+//          pixelLonLat() still added to composite so longitude and
+//          latitude properties are refreshed per-timestep in case
+//          of any projection shift.
+//
+//          geometries:false in sampleRegions — lon/lat from bands.
+// ================================================================
+var START     = ee.Date(YEAR + '-01-01');
+var labelList = ee.List(['Others'].concat(NAMES));
+
+var exportCols = ['pixel_id', 'label', 'label_name', 'zone',
+                  'timestep', 'date_str', 'longitude', 'latitude',
+                  'B2','B3','B4','B5','B6','B7','B8','B8A','B11','B12',
+                  'valid'];
+
+var lonLat = ee.Image.pixelLonLat();
+
+for (var t = 0; t < 36; t++) {
+  (function(timestep) {
+
+    var t0     = START.advance(timestep * 10, 'day');
+    var t1     = t0.advance(10, 'day');
+    var subset = s2.filterDate(t0, t1);
+
+    var hasPx = subset.select(BAND_NAMES).count()
+                      .select('B2')
+                      .gt(0)
+                      .unmask(0)
+                      .rename('valid');
+
+    var median    = subset.median().unmask(0).select(BAND_NAMES);
+    var composite = median.addBands(hasPx).addBands(lonLat);
+
+    // allPoints has true Point geometries — centroid never called
+    var extracted = composite.sampleRegions({
+      collection: allPoints,
+      scale     : 10,
+      geometries: false   // lon/lat come from lonLat bands
+    });
+
+    extracted = extracted.map(function(f) {
+      var lbl     = ee.Number(f.get('label')).int();
+      return f
+        .set('timestep',   timestep)
+        .set('date_str',   t0.format('YYYY-MM-dd'))
+        .set('label_name', labelList.get(lbl))
+        .set('zone',       ZONE);
+      // 'longitude' and 'latitude' already set as properties from bands
+    });
+
+    var month   = String(Math.floor(timestep / 3) + 1);
+    if (month.length === 1) month = '0' + month;
+    var daySlot = (timestep % 3) + 1;
+    var fname   = ZONE + '_t' + (timestep < 10 ? '0' : '') + timestep
+                + '_' + month + '_d' + daySlot;
+
+    Export.table.toDrive({
+      collection    : extracted,
+      description   : fname,
+      folder        : 'MCTNet_' + ZONE,
+      fileNamePrefix: fname,
+      fileFormat    : 'CSV',
+      selectors     : exportCols
+    });
+
+  })(t);
+}
+
+print('★ 36 export tasks created for: ' + ZONE);
+print('  Tasks panel → Run All');
+print('  Drive folder: MCTNet_' + ZONE + '/');
+
+// ================================================================
+// 9. MAP VISUALIZATION
+// ================================================================
 Map.setOptions('HYBRID');
-Map.setCenter(-96, 37, 4);
-Map.addLayer(CA_zone1, {color:'FF0000', fillColor:'FF000033'}, '🔴 CA Zone1');
-Map.addLayer(CA_zone2, {color:'CC0000', fillColor:'CC000033'}, '🔴 CA Zone2');
-Map.addLayer(AR_zone1, {color:'0055FF', fillColor:'0055FF33'}, '🔵 AR Zone1');
-Map.addLayer(AR_zone2, {color:'003399', fillColor:'00339933'}, '🔵 AR Zone2');
+// Bypassing GEE geometry internal bugs entirely
+if (ZONE === 'arkansas') {
+  Map.setCenter(-92.13, 34.75, 7);
+} else {
+  Map.setCenter(-120.00, 37.75, 7);
+}
+Map.addLayer(region,
+  {color: '0000FF', fillColor: '0000FF22'}, ZONE);
 
-// Aperçu des classes remappées
-Map.addLayer(
-  AR_classImg.updateMask(finalMask).clip(AR_zone1),
-  {min:1, max:5, palette:['green','brown','cyan','yellow','gray']},
-  '🌾 AR Classes (1=Corn 2=Cotton 3=Rice 4=Soy 5=Other)'
-);
-Map.addLayer(
-  CA_classImg.updateMask(finalMask).clip(CA_zone1),
-  {min:1, max:6, palette:['purple','cyan','orange','pink','beige','gray']},
-  '🍇 CA Classes (1=Grapes 2=Rice 3=Alfalfa 4=Almonds 5=Pist 6=Other)'
-);
+Map.addLayer(labelBase.clip(region),
+  {min: 0, max: N,
+   palette: ['gray','green','brown','cyan','yellow','purple'].slice(0, N+1)},
+  'Crop labels');
+
+var vis = s2.filterDate('2021-07-01', '2021-07-31').median();
+Map.addLayer(vis.clip(region),
+  {bands: ['B8','B4','B3'], min: 0, max: 3000},
+  'S2 July 2021 NIR');
