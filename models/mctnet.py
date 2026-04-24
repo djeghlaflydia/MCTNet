@@ -10,7 +10,7 @@ Architecture (3-stage hierarchical):
     Stage 2: (B,18,20) → Positional Encoding(PE) → MSCNN + Transformer → CTFusion → (B,18,40)
              → MaxPool → (B,9,40)
     Stage 3: (B,9,40)  → PE   → MSCNN + Transformer → CTFusion → (B,9,80)
-             → GAP     → (B,80) → Linear → (B, n_classes)
+             → GMP (Max) → (B,80) → Linear → (B, n_classes)
 
 
              
@@ -320,10 +320,10 @@ class MCTNet(nn.Module):
         # Stage 3: (B,9,40) → (B,9,80)
         out = self.stage3(out)
 
-        # Global Average Pooling → (B,80)
-        out = out.mean(dim=1)
+        # Global Max Pooling (Paper Section 2.3.2) -> (B, 80)
+        out = out.amax(dim=1)
 
-        # Classification → (B, n_classes)
+        # Classification -> (B, n_classes)
         return self.head(out)
 
 

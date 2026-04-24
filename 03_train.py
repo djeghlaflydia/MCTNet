@@ -6,12 +6,11 @@ Project: Deep Learning for Crop Classification Using Multi-Source
 Paper  : MCTNet — Wang et al., 2024
 
 Training configuration (faithful to paper):
-    Optimizer  : AdamW
+    Optimizer  : Adam
     LR         : 0.001
-    Batch size : 64
+    Batch size : 32
     Epochs     : 200
-    Loss       : Focal Loss (γ=2)
-    Scheduler  : CosineAnnealingLR
+    Loss       : Cross Entropy
 =======================================================================
 """
 
@@ -21,8 +20,7 @@ import argparse
 import numpy as np
 import torch
 from torch.utils.data import DataLoader, Dataset
-from torch.optim import AdamW
-from torch.optim.lr_scheduler import CosineAnnealingLR
+from torch.optim import Adam
 import importlib
 
 # Add project root to path
@@ -93,15 +91,13 @@ def train(
     os.makedirs(save_dir, exist_ok=True)
     os.makedirs(result_dir, exist_ok=True)
 
-    # Paramètres article
-    optimizer = AdamW(model.parameters(), lr=0.001)
-    scheduler = CosineAnnealingLR(optimizer, T_max=num_epochs, eta_min=1e-6)
+    # Paramètres article (Table 3)
+    optimizer = Adam(model.parameters(), lr=0.001)
+    # Note: The paper does not mention a scheduler in Table 3.
+    # Standard Cross-Entropy is used as paper doesn't specify Focal Loss.
+    criterion = nn.CrossEntropyLoss()
 
-    # Calcul des poids pour Focal Loss
-    class_weights = compute_class_weights(train_loader.dataset.y, len(class_names))
-    criterion = FocalLoss(alpha=class_weights, gamma=2.0)
-
-    print(f"\n  Focal Loss: γ=2.0, α={class_weights.numpy().round(3)}")
+    print(f"\n  Optimizer: Adam, Loss: CrossEntropy")
     print(f"\n{'='*60}")
     print(f"  TRAINING — {state} — {num_epochs} epochs")
     print(f"{'='*60}")
@@ -140,7 +136,7 @@ def train(
         history["train_acc"].append(train_acc)
         history["val_acc"].append(val_acc)
 
-        scheduler.step()
+        # scheduler.step() - Removed to match paper
 
         # Save checkpnt
         marker = ""
@@ -158,7 +154,7 @@ def train(
             print(f"  Epoch {epoch+1:3d}/{num_epochs:3d} │ "
                   f"loss: {train_loss:.4f}/{val_loss:.4f} │ "
                   f"acc: {train_acc:.4f}/{val_acc:.4f} │ "
-                  f"lr: {scheduler.get_last_lr()[0]:.6f} {marker}")
+                  f"lr: {optimizer.param_groups[0]['lr']:.6f} {marker}")
 
     print(f"\n  ✅ Best val accuracy: {best_val_acc:.4f}")
     torch.save(history, os.path.join(save_dir, "history.pt"))
