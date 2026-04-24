@@ -18,8 +18,8 @@ import torch
 import pandas as pd
 import numpy as np
 from torch.utils.data import DataLoader, Dataset
-from torch.optim import AdamW
-from torch.optim.lr_scheduler import CosineAnnealingLR
+from torch.optim import Adam
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 # Path setup for imports
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -89,79 +89,128 @@ def evaluate(model, loader, criterion, device):
     return total_loss/total, correct/total, np.array(all_labels), np.array(all_preds)
 
 def train_config(state, config_name, in_channels, epochs=100, device="cuda"):
-    print(f"\n🚀 Training: {state} | Configuration: {config_name}")
+    print(f"\n[TRAIN] {state} | Configuration: {config_name}")
     
     loaders = get_ablation_loaders(state, config_name)
     class_names = AR_CLASSES if state == "Arkansas" else CA_CLASSES
     n_classes = len(class_names)
     
     model = MCTNet(in_channels=in_channels, n_classes=n_classes).to(device)
-    optimizer = AdamW(model.parameters(), lr=0.001)
-    scheduler = CosineAnnealingLR(optimizer, T_max=epochs)
     
-    weights = compute_class_weights(loaders["train"].dataset.y, n_classes)
-    criterion = FocalLoss(alpha=weights, gamma=2.0)
+    # Matching the optimized settings from 03_train.py
+    optimizer = Adam(model.parameters(), lr=0.001, weight_decay=5e-2)
+    scheduler = ReduceLROnPlateau(optimizer, mode='max', factor=0.5, patience=5)
+    criterion = torch.nn.CrossEntropyLoss()
     
     best_acc = 0
-    summary_results = {}
-
+    patience = 15
+    trigger_times = 0
+    history = {"train_loss": [], "val_loss": [], "train_acc": [], "val_acc": []}
+    
     for epoch in range(epochs):
         model.train()
+        running_loss = 0.0
+        correct = 0
+        total = 0
+        
         for X, m, y in loaders["train"]:
             X, m, y = X.to(device), m.to(device), y.to(device)
             optimizer.zero_grad()
-            loss = criterion(model(X, m), y)
+            outputs = model(X, m)
+            loss = criterion(outputs, y)
             loss.backward()
             optimizer.step()
-        scheduler.step()
+            
+            running_loss += loss.item() * X.size(0)
+            preds = outputs.argmax(dim=1)
+            correct += (preds == y).sum().item()
+            total += y.size(0)
+            
+        train_loss = running_loss / total
+        train_acc = correct / total
         
-        _, val_acc, _, _ = evaluate(model, loaders["val"], criterion, device)
+        val_loss, val_acc, _, _ = evaluate(model, loaders["val"], criterion, device)
+        scheduler.step(val_acc)
+        
+        history["train_loss"].append(train_loss)
+        history["val_loss"].append(val_loss)
+        history["train_acc"].append(train_acc)
+        history["val_acc"].append(val_acc)
+        
+        marker = ""
         if val_acc > best_acc:
             best_acc = val_acc
-            # Save temporary best
+            trigger_times = 0
+            marker = " ★ best"
+            # Save best
             save_path = f"./checkpoints/ablation/{state}_{config_name}_best.pt"
             os.makedirs(os.path.dirname(save_path), exist_ok=True)
             torch.save(model.state_dict(), save_path)
+        else:
+            trigger_times += 1
         
-        if (epoch+1) % 20 == 0:
-            print(f"  Epoch {epoch+1:3d}/{epochs} | Val Acc: {val_acc:.4f} (Best: {best_acc:.4f})")
+        if (epoch+1) % 10 == 0 or epoch == 0 or marker:
+            print(f"  Epoch {epoch+1:3d}/{epochs:3d} │ "
+                  f"loss: {train_loss:.4f}/{val_loss:.4f} │ "
+                  f"acc: {train_acc:.4f}/{val_acc:.4f} │ "
+                  f"lr: {optimizer.param_groups[0]['lr']:.6f} {marker}")
+
+        if trigger_times >= patience:
+            print(f"  [!] Early stopping at epoch {epoch+1}")
+            break
 
     # Final Eval on Test
-    model.load_state_dict(torch.load(f"./checkpoints/ablation/{state}_{config_name}_best.pt"))
+    best_path = f"./checkpoints/ablation/{state}_{config_name}_best.pt"
+    if os.path.exists(best_path):
+        model.load_state_dict(torch.load(best_path, map_location=device))
+        
     _, test_acc, y_true, y_pred = evaluate(model, loaders["test"], criterion, device)
     metrics = compute_metrics(y_true, y_pred, class_names)
     
-    print(f"  ✅ Finished {config_name}. Test Acc: {test_acc:.4f} | F1: {metrics['macro_f1']:.4f}")
+    print(f"  [OK] Finished {config_name}. Test Acc: {test_acc:.4f} | F1: {metrics['F1_macro']:.4f}")
+    
+    # Save history
+    hist_path = f"./checkpoints/ablation/{state}_{config_name}_history.pt"
+    torch.save(history, hist_path)
     
     return {
         "state": state,
         "config": config_name,
         "test_accuracy": test_acc,
-        "macro_f1": metrics["macro_f1"],
-        "kappa": metrics["kappa"]
+        "macro_f1": metrics["F1_macro"],
+        "kappa": metrics["Kappa"]
     }
 
 # -----------------------------------------------------------------------
 # MAIN
 # -----------------------------------------------------------------------
 if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(description="MCTNet Ablation Study")
+    parser.add_argument("--state", type=str, default=None, choices=["Arkansas", "California"], help="Run for specific state")
+    args = parser.parse_args()
+
     device = "cuda" if torch.cuda.is_available() else "cpu"
     results = []
     
     os.makedirs("./results/ablation", exist_ok=True)
     
-    for state in ["Arkansas", "California"]:
+    states = [args.state] if args.state else ["Arkansas", "California"]
+    
+    for state in states:
         for cfg_name, in_ch in CONFIGS.items():
             try:
                 res = train_config(state, cfg_name, in_ch, epochs=100, device=device)
                 results.append(res)
             except Exception as e:
-                print(f"  ❌ Failed {cfg_name} for {state}: {e}")
+                print(f"  [ERROR] Failed {cfg_name} for {state}: {e}")
                 
-    df_results = pd.DataFrame(results)
-    df_results.to_csv("./results/ablation/ablation_results.csv", index=False)
-    print("\n" + "="*60)
-    print("ABLATION STUDY COMPLETE")
-    print("Summary saved to ./results/ablation/ablation_results.csv")
-    print("="*60)
-    print(df_results)
+    if results:
+        df_results = pd.DataFrame(results)
+        output_path = f"./results/ablation/ablation_results_{args.state.lower() if args.state else 'all'}.csv"
+        df_results.to_csv(output_path, index=False)
+        print("\n" + "="*60)
+        print("ABLATION STUDY COMPLETE")
+        print(f"Summary saved to {output_path}")
+        print("="*60)
+        print(df_results)

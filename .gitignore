@@ -1,0 +1,32 @@
+# Data directories
+Donnees/
+Donnees_Merged/
+preprocessed/
+preprocessed_ablation/
+preprocessed_standard/
+
+# Large files
+datasets.pt
+df_all.csv
+best_model.pt
+
+# Python/Environment
+__pycache__/
+*.pyc
+.venv/
+env/
+venv/
+.env
+
+# Outputs and Checkpoints
+checkpoints/
+exploration_outputs/
+results/
+# If you want to keep plots but not CSVs in results, you could do:
+# results/**/*.csv
+# !results/**/*.png
+
+# IDEs
+.vscode/
+.idea/
+.ipynb_checkpoints/

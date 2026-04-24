@@ -23,72 +23,74 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 STATIC_COLS = ["elevation", "slope", "aspect", "clay", "sand", "org_carbon", "ph"]
 CLIMATE_COLS = ["temp", "precip"]
 
+def load_partitioned_csv(pattern):
+    files = sorted(glob.glob(pattern))
+    if not files:
+        return None
+    print(f"    -> Loading {len(files)} partitions for {os.path.basename(pattern)}...")
+    return pd.concat([pd.read_csv(f) for f in files], ignore_index=True)
+
 def merge_state_data(state):
     folder = f"MCTNet_{state.lower()}"
     s2_path = os.path.join(DATA_DIR, folder)
     
-    # Check for S2 files
+    # 1. Load S2 Data
     s2_files = sorted(glob.glob(os.path.join(s2_path, "*.csv")))
+    s2_files = [f for f in s2_files if "covariate" not in f.lower()]
     if not s2_files:
         print(f"  ⚠️ No Sentinel-2 data found for {state} in {s2_path}")
         return
     
-    # Check for Covariate files (Expected in the same folder or root)
-    static_file = os.path.join(DATA_DIR, folder, f"covariates_static_{state.lower()}.csv")
-    climate_file = os.path.join(DATA_DIR, folder, f"covariates_climate_{state.lower()}.csv")
-    
-    # 1. Load S2 Data
     print(f"  Processing {state}...")
-    dfs = [pd.read_csv(f) for f in s2_files if "covariate" not in f]
-    df_s2 = pd.concat(dfs, ignore_index=True)
+    df_s2 = pd.concat([pd.read_csv(f) for f in s2_files], ignore_index=True)
+    df_s2['pixel_id'] = df_s2['pixel_id'].astype(str)
 
-    # 2. Check and Load Covariates
-    has_static = os.path.exists(static_file)
-    has_climate = os.path.exists(climate_file)
+    # 2. Load Static Covariates (Partitioned or Single)
+    static_pattern = os.path.join(DATA_DIR, folder, f"*static_{state.lower()}*.csv")
+    df_static = load_partitioned_csv(static_pattern)
     
-    if not has_static and not has_climate:
-        print(f"    ⚠️ No covariate files found for {state}. Skipping merge.")
-        return
-
+    # 3. Load Climate Covariates (Partitioned or Single)
+    climate_pattern = os.path.join(DATA_DIR, folder, f"*climate_{state.lower()}*.csv")
+    df_climate = load_partitioned_csv(climate_pattern)
+    
     df_merged = df_s2
-    if has_static:
-        print(f"    -> Adding static covariates...")
-        df_static = pd.read_csv(static_file)
-        df_merged['pixel_id'] = df_merged['pixel_id'].astype(str)
+
+    # Merge Static
+    if df_static is not None:
+        print(f"    -> Merging static covariates...")
         df_static['pixel_id'] = df_static['pixel_id'].astype(str)
-        # Select only necessary columns from static
+        # Select valid columns
         valid_static = [c for c in STATIC_COLS if c in df_static.columns]
-        df_static = df_static[['pixel_id'] + valid_static]
+        df_static = df_static[['pixel_id'] + valid_static].drop_duplicates(subset='pixel_id')
         df_merged = pd.merge(df_merged, df_static, on='pixel_id', how='left')
     else:
-        print(f"    ⚠️ Static file missing for {state}. Skipping static columns.")
+        print(f"    ⚠️ No static covariates found for {state}.")
 
-    # 4. Merge Climate Covariates if available
-    if has_climate:
-        print(f"    -> Adding climate covariates...")
-        df_climate = pd.read_csv(climate_file)
-        # month = floor(timestep / 3) + 1
+    # Merge Climate
+    if df_climate is not None:
+        print(f"    -> Merging climate covariates...")
+        # month = floor(timestep / 3) + 1 (Approximate month mapping)
         df_merged['month'] = (df_merged['timestep'] // 3) + 1
         df_climate['pixel_id'] = df_climate['pixel_id'].astype(str)
         df_climate['month'] = df_climate['month'].astype(int)
+        
         valid_climate = [c for c in CLIMATE_COLS if c in df_climate.columns]
-        df_climate = df_climate[['pixel_id', 'month'] + valid_climate]
+        df_climate = df_climate[['pixel_id', 'month'] + valid_climate].drop_duplicates(subset=['pixel_id', 'month'])
         df_merged = pd.merge(df_merged, df_climate, on=['pixel_id', 'month'], how='left')
     else:
-        print(f"    ⚠️ Climate file missing for {state}. Skipping climate columns.")
+        print(f"    ⚠️ No climate covariates found for {state}.")
     
     # 5. Save Merged Data
     state_out_dir = os.path.join(OUTPUT_DIR, folder)
     os.makedirs(state_out_dir, exist_ok=True)
     
-    # We save in chunks to keep files small, similar to original
+    print(f"    -> Saving merged files to {state_out_dir}...")
     for timestep in range(36):
         df_t = df_merged[df_merged['timestep'] == timestep]
-        # Preserve filename pattern if possible
         filename = f"{state.lower()}_merged_t{timestep:02d}.csv"
         df_t.to_csv(os.path.join(state_out_dir, filename), index=False)
         
-    print(f"  ✅ {state}: Merged data saved to {state_out_dir}")
+    print(f"  [OK] {state} complete.")
 
 if __name__ == "__main__":
     print("=" * 60)

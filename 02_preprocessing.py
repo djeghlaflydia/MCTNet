@@ -156,15 +156,15 @@ def save_config(splits, meta, state, config_name):
                    os.path.join(path, f"{split}.pt"))
     
     torch.save(meta, os.path.join(path, "meta.pt"))
-    print(f"    ✅ Saved {config_name} tensors for {state}")
+    print(f"    Saved {config_name} tensors for {state}")
 
 # -----------------------------------------------------------------------
 # MAIN
 # -----------------------------------------------------------------------
 if __name__ == "__main__":
-    print("=" * 60)
-    print("STEP 4: ABLATION PREPROCESSING")
-    print("=" * 60)
+    print("\n" + "="*60)
+    print("ABLATION PREPROCESSING COMPLETE")
+    print("="*60)
 
     for state in ["Arkansas", "California"]:
         print(f"\nProcessing {state}...")
@@ -186,6 +186,6 @@ if __name__ == "__main__":
                 save_config(splits_norm, meta, state, config_name)
                 
             except Exception as e:
-                print(f"    ❌ Error in {config_name}: {e}")
+                print(f"    [ERROR] Error in {config_name}: {e}")
 
-    print("\n✅ Preprocessing complete.")
+    print("\nPreprocessing complete.")

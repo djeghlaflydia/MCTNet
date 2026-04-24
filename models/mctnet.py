@@ -282,10 +282,15 @@ class MCTNet(nn.Module):
                  ffn_factor=8, dropout=0.1):
         super().__init__()
 
-        d1 = in_channels        # 10
-        d2 = in_channels * 2    # 20
-        d3 = in_channels * 4    # 40
-        d_out = in_channels * 8 # 80
+        # Project input to a base dimension divisible by n_heads (e.g., 10 or 20)
+        # This ensures the ablation study works with any number of covariates.
+        self.base_dim = 10 if in_channels <= 10 else 20
+        self.input_proj = nn.Linear(in_channels, self.base_dim) if in_channels != self.base_dim else nn.Identity()
+
+        d1 = self.base_dim
+        d2 = self.base_dim * 2
+        d3 = self.base_dim * 4
+        d_out = self.base_dim * 8
 
         # Stage 1: ALPE-enabled (handles missing data)
         self.stage1 = MCTBlock(d1, n_heads, ffn_factor, dropout, use_alpe=True)
@@ -309,7 +314,10 @@ class MCTNet(nn.Module):
         Returns:
             logits : (B, n_classes)
         """
-        # Stage 1: (B,36,10) → (B,36,20) → pool → (B,18,20)
+        # Initial projection
+        x = self.input_proj(x)
+
+        # Stage 1: (B,36,base_dim) → (B,36,2*base_dim) → pool → (B,18,2*base_dim)
         out = self.stage1(x, mask)
         out = self.pool1(out.transpose(1, 2)).transpose(1, 2)
 

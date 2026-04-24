@@ -19,8 +19,10 @@ import sys
 import argparse
 import numpy as np
 import torch
+import torch.nn as nn
 from torch.utils.data import DataLoader, Dataset
 from torch.optim import Adam
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 import importlib
 
 # Add project root to path
@@ -30,17 +32,39 @@ from models.mctnet import MCTNet
 from utils.losses import FocalLoss, compute_class_weights
 from utils.metrics import compute_metrics, print_metrics
 
-# Dynamically import 02_preprocessing because of the number prefix
-prep = importlib.import_module("02_preprocessing")
-get_dataloaders = prep.get_dataloaders
-CropDataset = prep.CropDataset
-
 # -----------------------------------------------------------------------
 # CONFIGURATION
 # -----------------------------------------------------------------------
 PREPROCESSED_DIR = "./preprocessed"
 CHECKPOINT_DIR = "./checkpoints"
 RESULTS_DIR = "./results"
+
+# -----------------------------------------------------------------------
+# DATA LOADING
+# -----------------------------------------------------------------------
+class CropDataset(Dataset):
+    def __init__(self, state, split):
+        path = os.path.join(PREPROCESSED_DIR, state, f"{split}.pt")
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"Data not found: {path}. Run preprocessing first.")
+
+        data = torch.load(path, weights_only=False)
+        self.X = data["X"]
+        self.mask = data["mask"]
+        self.y = data["y"]
+
+    def __len__(self):
+        return len(self.y)
+
+    def __getitem__(self, idx):
+        return self.X[idx], self.mask[idx], self.y[idx]
+
+def get_dataloaders(state, batch_size):
+    loaders = {}
+    for split in ["train", "val", "test"]:
+        ds = CropDataset(state, split)
+        loaders[split] = DataLoader(ds, batch_size=batch_size, shuffle=(split == "train"))
+    return loaders
 
 AR_CLASSES = {0: "Others", 1: "Corn", 2: "Cotton", 3: "Rice", 4: "Soybeans"}
 CA_CLASSES = {0: "Others", 1: "Grapes", 2: "Rice", 3: "Alfalfa",
@@ -77,7 +101,7 @@ def validate(model, loader, criterion, device):
 
     if total == 0:
         return 0.0, 0.0, np.array([]), np.array([])
-    
+
     return (total_loss / total, correct / total,
             np.array(all_preds), np.array(all_labels))
 
@@ -91,19 +115,18 @@ def train(
     os.makedirs(save_dir, exist_ok=True)
     os.makedirs(result_dir, exist_ok=True)
 
+    best_val_acc = 0.0
+    patience = 15
+    trigger_times = 0
+    history = {"train_loss": [], "val_loss": [], "train_acc": [], "val_acc": []}
+
     # Paramètres article (Table 3)
-    optimizer = Adam(model.parameters(), lr=0.001)
-    # Note: The paper does not mention a scheduler in Table 3.
-    # Standard Cross-Entropy is used as paper doesn't specify Focal Loss.
+    optimizer = Adam(model.parameters(), lr=0.001, weight_decay=5e-2)
+    scheduler = ReduceLROnPlateau(optimizer, mode='max', factor=0.5, patience=5)
     criterion = nn.CrossEntropyLoss()
 
-    print(f"\n  Optimizer: Adam, Loss: CrossEntropy")
-    print(f"\n{'='*60}")
-    print(f"  TRAINING — {state} — {num_epochs} epochs")
-    print(f"{'='*60}")
-
-    best_val_acc = 0.0
-    history = {"train_loss": [], "val_loss": [], "train_acc": [], "val_acc": []}
+    print(f"\n  Optimizer: Adam (WD: 0.05), Loss: CrossEntropy")
+    print(f"  Early Stopping: {patience} epochs, Scheduler: ReduceLROnPlateau")
 
     for epoch in range(num_epochs):
         model.train()
@@ -136,12 +159,14 @@ def train(
         history["train_acc"].append(train_acc)
         history["val_acc"].append(val_acc)
 
-        # scheduler.step() - Removed to match paper
+        # Scheduler step based on validation accuracy
+        scheduler.step(val_acc)
 
-        # Save checkpnt
+        # Save checkpoint and Early Stopping logic
         marker = ""
         if val_acc > best_val_acc:
             best_val_acc = val_acc
+            trigger_times = 0
             marker = " ★ best"
             torch.save({
                 "epoch": epoch,
@@ -149,6 +174,8 @@ def train(
                 "optimizer_state_dict": optimizer.state_dict(),
                 "val_acc": val_acc,
             }, os.path.join(save_dir, "best_model.pt"))
+        else:
+            trigger_times += 1
 
         if (epoch + 1) % 10 == 0 or epoch == 0 or marker:
             print(f"  Epoch {epoch+1:3d}/{num_epochs:3d} │ "
@@ -156,12 +183,16 @@ def train(
                   f"acc: {train_acc:.4f}/{val_acc:.4f} │ "
                   f"lr: {optimizer.param_groups[0]['lr']:.6f} {marker}")
 
+        if trigger_times >= patience:
+            print(f"\n  [!] Early stopping at epoch {epoch+1}")
+            break
+
     print(f"\n  ✅ Best val accuracy: {best_val_acc:.4f}")
     torch.save(history, os.path.join(save_dir, "history.pt"))
 
     # ========================== EVALUATION ==========================
     print(f"\n{'='*60}\n  FINAL EVALUATION ON TEST SET\n{'='*60}")
-    
+
     ckpt = torch.load(os.path.join(save_dir, "best_model.pt"), weights_only=False)
     model.load_state_dict(ckpt["model_state_dict"])
 
@@ -218,11 +249,11 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"Failed to load dataloaders: {e}")
         exit(1)
-        
+
     train_ds = CropDataset(args.state, "train")
     val_ds   = CropDataset(args.state, "val")
     test_ds  = CropDataset(args.state, "test")
-    
+
     print(f"  Train : {len(train_ds)} samples ({len(loaders['train'])} batches)")
     print(f"  Val   : {len(val_ds)} samples ({len(loaders['val'])} batches)")
     print(f"  Test  : {len(test_ds)} samples ({len(loaders['test'])} batches)")

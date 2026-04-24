@@ -10,6 +10,7 @@ the model performance across different covariate configurations.
 
 import os
 import pandas as pd
+import torch
 import matplotlib.pyplot as plt
 import seaborn as sns
 
@@ -17,6 +18,7 @@ import seaborn as sns
 # CONFIGURATION
 # -----------------------------------------------------------------------
 RESULTS_FILE = "./results/ablation/ablation_results.csv"
+CHECKPOINT_DIR = "./checkpoints/ablation"
 OUTPUT_DIR   = "./results/ablation/plots"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
@@ -67,6 +69,46 @@ def plot_ablation_comparison(df):
     plt.savefig(os.path.join(OUTPUT_DIR, "ablation_accuracy_comparison.png"), dpi=200)
     print("  ✓ Saved: ablation_accuracy_comparison.png")
 
+def plot_training_curves(df, state):
+    print(f"  📊 Generating individual training curves for {state}...")
+    
+    configs = df['config'].unique()
+    for config in configs:
+        hist_path = os.path.join(CHECKPOINT_DIR, f"{state}_{config}_history.pt")
+        if not os.path.exists(hist_path):
+            continue
+            
+        history = torch.load(hist_path, weights_only=False)
+        epochs = range(1, len(history["train_loss"]) + 1)
+        
+        fig, axes = plt.subplots(1, 2, figsize=(15, 6))
+        fig.suptitle(f"MCTNet Training History: {state} — {config}", fontsize=15, fontweight='bold')
+        
+        # 1. Loss Curve
+        axes[0].plot(epochs, history["train_loss"], label="Train Loss", color="#1f77b4", linewidth=2)
+        axes[0].plot(epochs, history["val_loss"], label="Val Loss", color="#ff7f0e", linewidth=2)
+        axes[0].set_title("Loss over Epochs")
+        axes[0].set_xlabel("Epoch")
+        axes[0].set_ylabel("Loss")
+        axes[0].legend()
+        axes[0].grid(True, alpha=0.3)
+        
+        # 2. Accuracy Curve
+        axes[1].plot(epochs, history["train_acc"], label="Train Acc", color="#2ca02c", linewidth=2)
+        axes[1].plot(epochs, history["val_acc"], label="Val Acc", color="#d62728", linewidth=2)
+        axes[1].set_title("Accuracy over Epochs")
+        axes[1].set_xlabel("Epoch")
+        axes[1].set_ylabel("Accuracy")
+        axes[1].set_ylim(0, 1.02)
+        axes[1].legend()
+        axes[1].grid(True, alpha=0.3)
+        
+        plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+        filename = f"training_curves_{state.lower()}_{config}.png"
+        plt.savefig(os.path.join(OUTPUT_DIR, filename), dpi=150)
+        plt.close()
+        print(f"    ✓ Saved: {filename}")
+
 def print_summary_table(df):
     if df.empty: return
     
@@ -82,19 +124,40 @@ def print_summary_table(df):
     for state in df['state'].unique():
         state_df = df[df['state'] == state]
         best_cfg = state_df.loc[state_df['macro_f1'].idxmax()]
-        print(f"\n🏆 Best Configuration for {state}: '{best_cfg['config']}' (F1: {best_cfg['macro_f1']:.4f})")
+        print(f"\n[BEST] Configuration for {state}: '{best_cfg['config']}' (F1: {best_cfg['macro_f1']:.4f})")
 
 if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(description="Analyze Ablation Results")
+    parser.add_argument("--state", type=str, default=None, help="State to analyze (Arkansas/California)")
+    args = parser.parse_args()
+
     print("=" * 60)
     print("STEP 6: ANALYZING ABLATION RESULTS")
     print("=" * 60)
     
-    if os.path.exists(RESULTS_FILE):
-        df = pd.read_csv(RESULTS_FILE)
+    # Check for state-specific or all results
+    if args.state:
+        filename = f"ablation_results_{args.state.lower()}.csv"
+    else:
+        filename = "ablation_results_all.csv"
+        # Fallback to old name if needed
+        if not os.path.exists(os.path.join(os.path.dirname(RESULTS_FILE), filename)):
+            filename = "ablation_results.csv"
+
+    results_path = os.path.join(os.path.dirname(RESULTS_FILE), filename)
+
+    if os.path.exists(results_path):
+        print(f"  📂 Loading: {results_path}")
+        df = pd.read_csv(results_path)
         plot_ablation_comparison(df)
         print_summary_table(df)
+        
+        # Generate curves for each state found in the results
+        for state in df['state'].unique():
+            plot_training_curves(df[df['state'] == state], state)
     else:
-        # Create a dummy dataframe for demonstration if file doesn't exist
-        # This allows the user to see what the script will look like
-        print(f"  ⚠️ {RESULTS_FILE} not found. Use 07_ablation_study.py to generate it.")
-        print("  Creating an empty template analysis script.")
+        print(f"  ⚠️ {results_path} not found.")
+        print("  Available files in results/ablation/:")
+        for f in os.listdir(os.path.dirname(RESULTS_FILE)):
+            if f.endswith(".csv"): print(f"    - {f}")

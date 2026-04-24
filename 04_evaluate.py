@@ -28,8 +28,25 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from models.mctnet import MCTNet
 from utils.metrics import compute_metrics, print_metrics
 
-prep = importlib.import_module("02_preprocessing")
-CropDataset = prep.CropDataset
+# -----------------------------------------------------------------------
+# DATA LOADING
+# -----------------------------------------------------------------------
+class CropDataset(torch.utils.data.Dataset):
+    def __init__(self, state, split):
+        path = os.path.join(PREPROCESSED_DIR, state, f"{split}.pt")
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"Data not found: {path}. Run preprocessing first.")
+        
+        data = torch.load(path, weights_only=False)
+        self.X = data["X"]
+        self.mask = data["mask"]
+        self.y = data["y"]
+
+    def __len__(self):
+        return len(self.y)
+
+    def __getitem__(self, idx):
+        return self.X[idx], self.mask[idx], self.y[idx]
 
 # -----------------------------------------------------------------------
 # CONFIGURATION
