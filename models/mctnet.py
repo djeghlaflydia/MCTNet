@@ -279,13 +279,14 @@ class MCTNet(nn.Module):
         dropout     : float — dropout rate (default: 0.1)
     """
     def __init__(self, in_channels=10, n_classes=5, n_heads=5,
-                 ffn_factor=8, dropout=0.1):
+                 ffn_factor=4, dropout=0.2):
         super().__init__()
 
-        # Project input to a base dimension divisible by n_heads (e.g., 10 or 20)
-        # This ensures the ablation study works with any number of covariates.
-        self.base_dim = 10 if in_channels <= 10 else 20
-        self.input_proj = nn.Linear(in_channels, self.base_dim) if in_channels != self.base_dim else nn.Identity()
+        # --- FAIR ABLATION FIX ---
+        # We always project input to base_dim=10, even if we have 19 covariates.
+        # This ensures model capacity (params) is IDENTICAL for all ablation runs.
+        self.base_dim = 10
+        self.input_proj = nn.Linear(in_channels, self.base_dim)
 
         d1 = self.base_dim
         d2 = self.base_dim * 2

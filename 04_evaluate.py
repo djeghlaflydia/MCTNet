@@ -220,8 +220,8 @@ def evaluate(state, device=None):
         in_channels=10,
         n_classes=n_classes,
         n_heads=5,
-        ffn_factor=8,
-        dropout=0.1
+        ffn_factor=4,
+        dropout=0.2
     ).to(device)
 
     model.load_state_dict(ckpt["model_state_dict"])

@@ -269,8 +269,8 @@ if __name__ == "__main__":
         in_channels=10,
         n_classes=len(class_names),
         n_heads=5,
-        ffn_factor=8,
-        dropout=0.1
+        ffn_factor=4,
+        dropout=0.2
     ).to(device)
 
     total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
