@@ -35,7 +35,8 @@ from utils.metrics import compute_metrics, print_metrics
 # -----------------------------------------------------------------------
 # CONFIGURATION
 # -----------------------------------------------------------------------
-PREPROCESSED_DIR = "./preprocessed"
+PREPROCESSED_DIR = "./preprocessed_ablation"
+CONFIG_NAME = "baseline"  # Default to baseline (10 channels)
 CHECKPOINT_DIR = "./checkpoints"
 RESULTS_DIR = "./results"
 
@@ -44,7 +45,7 @@ RESULTS_DIR = "./results"
 # -----------------------------------------------------------------------
 class CropDataset(Dataset):
     def __init__(self, state, split):
-        path = os.path.join(PREPROCESSED_DIR, state, f"{split}.pt")
+        path = os.path.join(PREPROCESSED_DIR, state, CONFIG_NAME, f"{split}.pt")
         if not os.path.exists(path):
             raise FileNotFoundError(f"Data not found: {path}. Run preprocessing first.")
 
@@ -224,9 +225,9 @@ def train(
 # -----------------------------------------------------------------------
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="MCTNet Training")
-    parser.add_argument("--state", type=str, default="Arkansas",
-                        choices=["Arkansas", "California"],
-                        help="Study area (default: Arkansas)")
+    parser.add_argument("--state", type=str, default="Both",
+                        choices=["Arkansas", "California", "Both"],
+                        help="Study area (default: Both)")
     parser.add_argument("--epochs", type=int, default=200,
                         help="Number of training epochs (default: 200)")
     parser.add_argument("--batch_size", type=int, default=32,
@@ -235,56 +236,58 @@ if __name__ == "__main__":
                         help="Device: cuda or cpu (default: auto)")
     args = parser.parse_args()
 
-    print("=" * 60)
-    print("STEP 6 — TRAINING MCTNet")
-    print("MCTNet Project — M1 SII USTHB 2025/2026")
-    print("=" * 60)
+    states_to_process = ["Arkansas", "California"] if args.state == "Both" else [args.state]
 
-    device = torch.device(args.device if args.device else ("cuda" if torch.cuda.is_available() else "cpu"))
-    print(f"\n🖥️  Device: {device.type}\n")
+    for state in states_to_process:
+        print("\n" + "=" * 60)
+        print(f" PROCESSING STATE: {state.upper()}")
+        print("=" * 60)
 
-    print(f"📂 Loading preprocessed data: {args.state}")
-    try:
-        loaders = get_dataloaders(args.state, batch_size=args.batch_size)
-    except Exception as e:
-        print(f"Failed to load dataloaders: {e}")
-        exit(1)
+        device = torch.device(args.device if args.device else ("cuda" if torch.cuda.is_available() else "cpu"))
+        print(f"\n🖥️  Device: {device.type}\n")
 
-    train_ds = CropDataset(args.state, "train")
-    val_ds   = CropDataset(args.state, "val")
-    test_ds  = CropDataset(args.state, "test")
+        print(f"📂 Loading preprocessed data: {state}")
+        try:
+            loaders = get_dataloaders(state, batch_size=args.batch_size)
+        except Exception as e:
+            print(f"Failed to load dataloaders for {state}: {e}")
+            continue
 
-    print(f"  Train : {len(train_ds)} samples ({len(loaders['train'])} batches)")
-    print(f"  Val   : {len(val_ds)} samples ({len(loaders['val'])} batches)")
-    print(f"  Test  : {len(test_ds)} samples ({len(loaders['test'])} batches)")
+        train_ds = CropDataset(state, "train")
+        val_ds   = CropDataset(state, "val")
+        test_ds  = CropDataset(state, "test")
 
-    if args.state == "Arkansas":
-        class_names = [AR_CLASSES[i] for i in range(5)]
-    else:
-        class_names = [CA_CLASSES[i] for i in range(6)]
+        print(f"  Train : {len(train_ds)} samples ({len(loaders['train'])} batches)")
+        print(f"  Val   : {len(val_ds)} samples ({len(loaders['val'])} batches)")
+        print(f"  Test  : {len(test_ds)} samples ({len(loaders['test'])} batches)")
 
-    print(f"  Classes: {len(class_names)} → {class_names}")
+        if state == "Arkansas":
+            class_names = [AR_CLASSES[i] for i in range(5)]
+        else:
+            class_names = [CA_CLASSES[i] for i in range(6)]
 
-    model = MCTNet(
-        in_channels=10,
-        n_classes=len(class_names),
-        n_heads=5,
-        ffn_factor=4,
-        dropout=0.2
-    ).to(device)
+        print(f"  Classes: {len(class_names)} → {class_names}")
 
-    total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    print(f"\n🧠 MCTNet: {total_params:,} trainable parameters")
+        model = MCTNet(
+            in_channels=10,
+            n_classes=len(class_names),
+            n_heads=5,
+            ffn_factor=4,
+            dropout=0.2
+        ).to(device)
 
-    train(
-        model=model,
-        train_loader=loaders["train"],
-        val_loader=loaders["val"],
-        test_loader=loaders["test"],
-        num_epochs=args.epochs,
-        device=device,
-        state=args.state,
-        class_names=class_names,
-        test_ds=test_ds,
-        val_ds=val_ds
-    )
+        total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        print(f"\n🧠 MCTNet: {total_params:,} trainable parameters")
+
+        train(
+            model=model,
+            train_loader=loaders["train"],
+            val_loader=loaders["val"],
+            test_loader=loaders["test"],
+            num_epochs=args.epochs,
+            device=device,
+            state=state,
+            class_names=class_names,
+            test_ds=test_ds,
+            val_ds=val_ds
+        )

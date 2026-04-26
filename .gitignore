@@ -18,14 +18,6 @@ env/
 venv/
 .env
 
-# Outputs and Checkpoints
-checkpoints/
-exploration_outputs/
-results/
-# If you want to keep plots but not CSVs in results, you could do:
-# results/**/*.csv
-# !results/**/*.png
-
 # IDEs
 .vscode/
 .idea/

@@ -33,7 +33,7 @@ from utils.metrics import compute_metrics, print_metrics
 # -----------------------------------------------------------------------
 class CropDataset(torch.utils.data.Dataset):
     def __init__(self, state, split):
-        path = os.path.join(PREPROCESSED_DIR, state, f"{split}.pt")
+        path = os.path.join(PREPROCESSED_DIR, state, "baseline", f"{split}.pt")
         if not os.path.exists(path):
             raise FileNotFoundError(f"Data not found: {path}. Run preprocessing first.")
         
@@ -51,7 +51,7 @@ class CropDataset(torch.utils.data.Dataset):
 # -----------------------------------------------------------------------
 # CONFIGURATION
 # -----------------------------------------------------------------------
-PREPROCESSED_DIR = "./preprocessed"
+PREPROCESSED_DIR = "./preprocessed_ablation"
 CHECKPOINT_DIR = "./checkpoints"
 RESULTS_DIR = "./results"
 
@@ -267,7 +267,9 @@ def evaluate(state, device=None):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Evaluate trained MCTNet")
-    parser.add_argument("--state", type=str, default="Arkansas", choices=["Arkansas", "California"])
+    parser.add_argument("--state", type=str, default="Both",
+                        choices=["Arkansas", "California", "Both"],
+                        help="Study area (default: Both)")
     parser.add_argument("--device", type=str, default=None)
     args = parser.parse_args()
 
@@ -275,4 +277,10 @@ if __name__ == "__main__":
     print("STEP 7 — EVALUATION & VISUALIZATION")
     print("======================================================")
 
-    evaluate(args.state, args.device)
+    states_to_process = ["Arkansas", "California"] if args.state == "Both" else [args.state]
+
+    for state in states_to_process:
+        print("\n" + "=" * 60)
+        print(f" EVALUATING STATE: {state.upper()}")
+        print("=" * 60)
+        evaluate(state, args.device)

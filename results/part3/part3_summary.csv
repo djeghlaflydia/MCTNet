@@ -1,0 +1,7 @@
+State,Model,OA,Kappa,F1_macro
+Arkansas,Paper (MCTNet),0.968,0.951,0.933
+Arkansas,MCTNet,0.8384,0.7682,0.7928
+Arkansas,ECMTNet,0.8726,0.8139,0.8264
+California,Paper (MCTNet),0.852,0.806,0.829
+California,MCTNet,0.8489,0.8015,0.7946
+California,ECMTNet,0.844,0.7947,0.7795
