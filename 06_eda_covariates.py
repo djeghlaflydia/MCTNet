@@ -26,8 +26,8 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 AR_CLASSES = {1: "Corn", 2: "Cotton", 3: "Rice", 4: "Soybean", 0: "Others"}
 CA_CLASSES = {1: "Grapes", 3: "Alfalfa", 2: "Rice", 4: "Almonds", 5: "Pistachios", 0: "Others"}
 
-STATIC_COLS = ["elevation", "slope", "aspect", "clay", "sand", "org_carbon", "ph"]
-CLIMATE_COLS = ["temp", "precip"]
+STATIC_COLS = ["elevation", "landforms", "clay", "org_carbon", "ph"]
+CLIMATE_COLS = ["temp", "precip", "solar_rad"]
 
 def load_merged_state(state):
     folder = f"MCTNet_{state.lower()}"

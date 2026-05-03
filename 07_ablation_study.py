@@ -59,10 +59,10 @@ def get_ablation_loaders(state, config, batch_size=32):
 # -----------------------------------------------------------------------
 CONFIGS = {
     "baseline":   10,
-    "s2_climate": 12,
-    "s2_soil":    14,
-    "s2_topo":    13,
-    "all":        19
+    "s2_climate": 13,
+    "s2_soil":    13,
+    "s2_topo":    12,
+    "all":        18
 }
 
 AR_CLASSES = ["Others", "Corn", "Cotton", "Rice", "Soybeans"]

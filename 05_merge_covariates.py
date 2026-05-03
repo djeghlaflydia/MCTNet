@@ -20,8 +20,8 @@ DATA_DIR    = "./Donnees"
 OUTPUT_DIR  = "./Donnees_Merged"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-STATIC_COLS = ["elevation", "slope", "aspect", "clay", "sand", "org_carbon", "ph"]
-CLIMATE_COLS = ["temp", "precip"]
+STATIC_COLS = ["elevation", "landforms", "clay", "org_carbon", "ph"]
+CLIMATE_COLS = ["temp", "precip", "solar_rad"]
 
 def load_partitioned_csv(pattern):
     files = sorted(glob.glob(pattern))
