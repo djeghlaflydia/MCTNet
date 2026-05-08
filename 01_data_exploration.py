@@ -32,7 +32,7 @@ CA_COLORS = {1: "#1f77b4", 3: "#ff7f0e", 2: "#2ca02c", 4: "#d62728", 5: "#9467bd
 BANDS = ["B2", "B3", "B4", "B5", "B6", "B7", "B8", "B8A", "B11", "B12"]
 BAND_NAMES = {
     "B2": "Blue", "B3": "Green", "B4": "Red",
-    "B5": "RE 1", "B6": "RE 2", "B7": "RE 3",
+    "B5": "RE 1", "B6": "RE 2", "7": "RE 3",
     "B8": "NIR", "B8A": "RE 4",
     "B11": "SWIR 1", "B12": "SWIR 2"
 }
@@ -60,7 +60,8 @@ def plot_ndvi_timeseries(AR, CA):
     fig, axes = plt.subplots(2, 1, figsize=(10, 8))
     for ax, df, class_map, color_map, title in [(axes[0], AR, AR_CLASSES, AR_COLORS, "(a) Arkansas"), (axes[1], CA, CA_CLASSES, CA_COLORS, "(b) California")]:
         if df.empty: continue
-        df_valid = df[df["missing"] == 0].copy()
+        # Optimisation : Sélectionner uniquement les colonnes nécessaires pour réduire la mémoire
+        df_valid = df[df["missing"] == 0][["doy", "NDVI", "label"]]
         legend_order = [1, 2, 3, 4, 0] if "Arkansas" in title else [1, 3, 2, 4, 5, 0]
         for cls in legend_order:
             if cls not in class_map: continue
@@ -79,10 +80,10 @@ def plot_ndvi_timeseries(AR, CA):
         ax.set_xlabel("Day of Year", fontsize=11)
     plt.tight_layout()
     plt.savefig(os.path.join(OUTPUT_DIR, "04_ndvi_timeseries.png"), dpi=200)
-    print("✓ Saved: 04_ndvi_timeseries.png (Paper Style)")
+    print("OK: Saved: 04_ndvi_timeseries.png (Paper Style)")
 
 if __name__ == "__main__":
     AR, CA = load_state_data("Arkansas"), load_state_data("California")
     AR, CA = add_vegetation_indices(AR), add_vegetation_indices(CA)
     plot_ndvi_timeseries(AR, CA)
-    print(f"✅ Exploration complete. Plots saved in {OUTPUT_DIR}/")
+    print(f"OK: Exploration complete. Plots saved in {OUTPUT_DIR}/")
