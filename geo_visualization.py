@@ -3,306 +3,142 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
-
 from matplotlib.colors import ListedColormap
 
 # =========================================================
-# CONFIG
+# CONFIGURATION
 # =========================================================
 
 SEED = 42
 
-CLASSES = [
-    "Others",
-    "Grapes",
-    "Rice",
-    "Alfalfa",
-    "Almonds",
-    "Pistachios"
-]
+# Mapping des classes et couleurs (Cohérent avec le reste du projet)
+CA_CLASSES = ["Others", "Grapes", "Rice", "Alfalfa", "Almonds", "Pistachios"]
+CA_COLORS  = ["#9467bd", "#1f77b4", "#2ca02c", "#ff7f0e", "#d62728", "#8c564b"]
 
-COLOR_LIST = [
-    "#E41A1C", # Others
-    "#377EB8", # Grapes
-    "#4DAF4A", # Rice
-    "#984EA3", # Alfalfa
-    "#FF7F00", # Almonds
-    "#F781BF"  # Pistachios
-]
+AR_CLASSES = ["Others", "Corn", "Cotton", "Rice", "Soybeans"]
+AR_COLORS  = ["#9467bd", "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728"]
 
-# =========================================================
-# LOAD LABELS / PREDICTIONS
-# =========================================================
+# Mapping des labels demandés par l'utilisateur
+CONFIG_LABELS = {
+    "baseline":   "Sentinel-2 bands only",
+    "s2_climate": "Sentinel-2 + climate variables",
+    "s2_soil":    "Sentinel-2 + soil variables",
+    "s2_topo":    "Sentinel-2 + topographic variables",
+    "all":        "Sentinel-2 + climate + soil + topography"
+}
 
-y_true = np.load(
-    "part3_results/California_all/labels.npy"
-)
+def plot_geo_maps(state, config_key):
+    """
+    Génère les cartes géographiques pour un état et une configuration donnés.
+    Compare la Vérité Terrain vs Prédiction et affiche les erreurs.
+    """
+    
+    # 1. Définition des dossiers de résultats
+    results_folder = os.path.join("part3_results", f"{state}_{config_key}")
+    y_true_path = os.path.join(results_folder, "labels.npy")
+    y_pred_path = os.path.join(results_folder, "preds.npy")
+    
+    # Vérifier si les résultats existent pour cette configuration
+    if not os.path.exists(y_true_path) or not os.path.exists(y_pred_path):
+        return
 
-y_pred = np.load(
-    "part3_results/California_all/preds.npy"
-)
+    print(f"-> Traitement de {state} | Configuration: {config_key}...")
 
-# =========================================================
-# GEO MAP FUNCTION
-# =========================================================
+    # 2. Chargement des prédictions (Numpy)
+    y_true = np.load(y_true_path)
+    y_pred = np.load(y_pred_path)
 
-def plot_geo_maps(y_true, y_pred):
-
-    # =====================================================
-    # Charger un fichier merged Arkansas // California
-    # =====================================================
-
-    csv_file = (
-        "Donnees_Merged/MCTNet_california/"
-        "california_merged_t00.csv"
-    )
-
+    # 3. Chargement des coordonnées géographiques depuis les données originales
+    csv_file = os.path.join("Donnees_Merged", f"MCTNet_{state.lower()}", f"{state.lower()}_merged_t00.csv")
     if not os.path.exists(csv_file):
-        print(f"❌ Fichier introuvable : {csv_file}")
+        print(f"⚠️ Fichier source introuvable : {csv_file}")
         return
-
+        
     df = pd.read_csv(csv_file)
-
-    print("Colonnes disponibles :")
-    print(df.columns.tolist())
-
-    # =====================================================
-    # Vérifier les colonnes géographiques
-    # =====================================================
-
-    required_cols = ['pixel_id', 'label_name', 'longitude', 'latitude']
-
-    missing = [c for c in required_cols if c not in df.columns]
-
-    if missing:
-        print(f"❌ Colonnes manquantes : {missing}")
-        return
-
-    # =====================================================
-    # Garder uniquement les colonnes utiles
-    # =====================================================
-
-    df = df[['pixel_id', 'label_name', 'longitude', 'latitude']]
-
-    # =====================================================
-    # Reproduire le split test
-    # =====================================================
-
+    
+    # 4. Reproduction exacte du split TEST utilisé lors de l'entraînement
+    # On ignore les 300 premiers échantillons de chaque classe (utilisés pour train/val)
     np.random.seed(SEED)
-
     idx_test = []
-
-    for cls in df['label_name'].unique():
-
-        idx_cls = df[df['label_name'] == cls].index.tolist()
-
+    for lbl in sorted(df['label'].unique()):
+        idx_cls = df[df['label'] == lbl].index.tolist()
         np.random.shuffle(idx_cls)
-
-        idx_test += idx_cls[300:]
-
+        idx_test += idx_cls[300:] # Le test set correspond au reste
+        
     df_test = df.iloc[idx_test].reset_index(drop=True)
-
-    # =====================================================
-    # Adapter tailles
-    # =====================================================
-
-    n = min(len(df_test), len(y_true), len(y_pred))
-
+    
+    # Alignement des tailles entre les coordonnées et les prédictions
+    n = min(len(df_test), len(y_true))
     df_test = df_test.iloc[:n]
+    df_test['y_true']  = y_true[:n]
+    df_test['y_pred']  = y_pred[:n]
+    df_test['correct'] = (df_test['y_true'] == df_test['y_pred'])
 
-    df_test['y_true'] = y_true[:n]
-    df_test['y_pred'] = y_pred[:n]
-
-    df_test['correct'] = (
-        df_test['y_true'] == df_test['y_pred']
-    )
-
-    # =====================================================
-    # COLOR MAP
-    # =====================================================
-
-    cmap_classes = ListedColormap(COLOR_LIST)
-
-    legend_patches = [
-        mpatches.Patch(
-            color=COLOR_LIST[i],
-            label=CLASSES[i]
-        )
-        for i in range(len(CLASSES))
-    ]
-
+    # 5. Configuration visuelle
+    classes = CA_CLASSES if state == "California" else AR_CLASSES
+    colors  = CA_COLORS if state == "California" else AR_COLORS
+    
+    cmap_classes = ListedColormap(colors)
+    legend_patches = [mpatches.Patch(color=colors[i], label=classes[i]) for i in range(len(classes))]
     error_patches = [
-        mpatches.Patch(
-            color='#4CAF50',
-            label='Correct'
-        ),
-        mpatches.Patch(
-            color='#F44336',
-            label='Erreur'
-        ),
+        mpatches.Patch(color='#4CAF50', label='Correct'),
+        mpatches.Patch(color='#F44336', label='Error'),
     ]
 
-    # =====================================================
-    # FIGURE
-    # =====================================================
+    # 6. Création de la figure (3 colonnes)
+    fig, axes = plt.subplots(1, 3, figsize=(24, 8))
+    
+    # Titre dynamique selon la configuration
+    config_desc = CONFIG_LABELS.get(config_key, config_key)
+    fig.suptitle(f'{state} — {config_desc}', fontsize=18, fontweight='bold', y=0.98)
 
-    fig, axes = plt.subplots(
-        1,
-        3,
-        figsize=(24, 8)
-    )
-
-    fig.suptitle(
-        'California — Ground Truth / Prediction / Errors',
-        fontsize=16,
-        fontweight='bold'
-    )
-
+    # Données à tracer
     lon = df_test['longitude'].values
     lat = df_test['latitude'].values
-
     true_lbl = df_test['y_true'].values
     pred_lbl = df_test['y_pred'].values
-
-    correct = df_test['correct'].values
-
+    correct  = df_test['correct'].values
+    
+    # Taille adaptative des points
     s = max(2, min(10, 4000 // len(df_test)))
 
-    # =====================================================
-    # Ground Truth
-    # =====================================================
-
+    # --- Sous-graphe 1 : Vérité terrain (Ground Truth) ---
     ax = axes[0]
+    ax.scatter(lon, lat, c=true_lbl, cmap=cmap_classes, vmin=0, vmax=len(classes)-1, s=s, alpha=0.85, linewidths=0)
+    ax.set_title('Ground Truth (Réel)', fontsize=14, fontweight='bold')
+    ax.set_xlabel('Longitude'); ax.set_ylabel('Latitude'); ax.grid(alpha=0.2)
 
-    ax.scatter(
-        lon,
-        lat,
-        c=true_lbl,
-        cmap=cmap_classes,
-        vmin=0,
-        vmax=len(CLASSES)-1,
-        s=s,
-        alpha=0.85,
-        linewidths=0
-    )
-
-    ax.set_title(
-        'Ground Truth',
-        fontsize=12,
-        fontweight='bold'
-    )
-
-    ax.set_xlabel('Longitude')
-    ax.set_ylabel('Latitude')
-
-    ax.grid(alpha=0.2)
-
-    # =====================================================
-    # Prediction
-    # =====================================================
-
+    # --- Sous-graphe 2 : Prédiction du modèle ---
     ax = axes[1]
+    ax.scatter(lon, lat, c=pred_lbl, cmap=cmap_classes, vmin=0, vmax=len(classes)-1, s=s, alpha=0.85, linewidths=0)
+    ax.set_title('Prediction (Modèle)', fontsize=14, fontweight='bold')
+    ax.set_xlabel('Longitude'); ax.set_ylabel('Latitude'); ax.grid(alpha=0.2)
 
-    ax.scatter(
-        lon,
-        lat,
-        c=pred_lbl,
-        cmap=cmap_classes,
-        vmin=0,
-        vmax=len(CLASSES)-1,
-        s=s,
-        alpha=0.85,
-        linewidths=0
-    )
-
-    ax.set_title(
-        'Prediction',
-        fontsize=12,
-        fontweight='bold'
-    )
-
-    ax.set_xlabel('Longitude')
-    ax.set_ylabel('Latitude')
-
-    ax.grid(alpha=0.2)
-
-    # =====================================================
-    # Errors
-    # =====================================================
-
+    # --- Sous-graphe 3 : Localisation des erreurs ---
     ax = axes[2]
+    colors_err = np.where(correct, '#4CAF50', '#F44336') # Vert = OK, Rouge = Erreur
+    ax.scatter(lon, lat, c=colors_err, s=s, alpha=0.85, linewidths=0)
+    
+    n_ok, n_tot = correct.sum(), len(correct)
+    ax.set_title(f'Classification Errors (OA: {n_ok/n_tot:.1%})', fontsize=14, fontweight='bold')
+    ax.set_xlabel('Longitude'); ax.set_ylabel('Latitude'); ax.grid(alpha=0.2)
 
-    colors_err = np.where(
-        correct,
-        '#4CAF50',
-        '#F44336'
-    )
-
-    ax.scatter(
-        lon,
-        lat,
-        c=colors_err,
-        s=s,
-        alpha=0.85,
-        linewidths=0
-    )
-
-    n_ok = correct.sum()
-    n_tot = len(correct)
-
-    ax.set_title(
-        f'Errors\n'
-        f'Correct : {n_ok}/{n_tot} ({n_ok/n_tot:.1%})',
-        fontsize=12,
-        fontweight='bold'
-    )
-
-    ax.set_xlabel('Longitude')
-    ax.set_ylabel('Latitude')
-
-    ax.grid(alpha=0.2)
-
-    # =====================================================
-    # LEGEND
-    # =====================================================
-
-    all_patches = (
-        legend_patches + error_patches
-    )
-
-    fig.legend(
-        handles=all_patches,
-        loc='lower center',
-        ncol=len(CLASSES) + 2,
-        fontsize=10,
-        framealpha=0.9,
-        bbox_to_anchor=(0.5, -0.02)
-    )
+    # Légende commune en bas
+    all_patches = legend_patches + error_patches
+    fig.legend(handles=all_patches, loc='lower center', ncol=len(classes) + 2, 
+               fontsize=11, framealpha=0.9, bbox_to_anchor=(0.5, -0.05))
 
     plt.tight_layout()
+    
+    # Sauvegarde de l'image
+    save_name = f"geo_maps_{state.lower()}_{config_key}.png"
+    save_path = os.path.join("part3_results", save_name)
+    plt.savefig(save_path, dpi=200, bbox_inches='tight')
+    plt.close()
+    print(f"OK: Carte sauvegardée : {save_path}")
 
-    # =====================================================
-    # SAVE
-    # =====================================================
-
-    save_path = (
-        "part3_results/"
-        "geo_maps_california.png"
-    )
-
-    plt.savefig(
-        save_path,
-        dpi=300,
-        bbox_inches='tight'
-    )
-
-    print(f"OK: Sauvegardé : {save_path}")
-
-    plt.show()
-
-
-# =========================================================
-# RUN
-# =========================================================
-
-plot_geo_maps(y_true, y_pred)
+if __name__ == "__main__":
+    # Générer automatiquement les cartes pour chaque état et chaque configuration d'ablation
+    for state in ["Arkansas", "California"]:
+        for config in CONFIG_LABELS.keys():
+            plot_geo_maps(state, config)
